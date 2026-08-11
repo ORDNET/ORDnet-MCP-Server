@@ -1,0 +1,277 @@
+# ORDnet MCP Server v3.1
+
+> Enable AI agents to create Web3 content on Bitcoin SV blockchain
+
+[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](https://github.com/ORDNET/ORDnet-MCP-Server)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+## Overview
+
+ORDnet MCP Server enables AI agents (Claude, GPT, etc.) to create permanent, censorship-resistant content on the Bitcoin SV blockchain using the 1SatOrdinals protocol. This is a key component of the **freedom of speech** infrastructure - allowing AI to autonomously publish Web3 content.
+
+### Key Features
+
+- **43 MCP Tools** for complete blockchain content creation, payments and transfers
+- **BRC-100 aligned identity** (v3.0): `ordnet_identity`, `ordnet_sign_message`, `ordnet_verify_message`, `ordnet_derive_payment_address` — agent identity, off-chain signing, and per-invoice payment-address derivation as the foundation for x402
+- **Agent payments**: `ordnet_send` (P2PKH + optional OP_RETURN reference, miner fee only — x402-ready), `ordnet_transfer` for ordinals/domains (1SatOrdinals input-0/output-0 semantics, outpoint verified via own node)
+- **Binary inscriptions** via `ordnet_inscribe_binary` (base64 → bytes untouched); BSVmap tile claims via `ordnet_bsvmap_inscribe`
+- **Agent conveniences**: `ordnet_tx_status` (confirmations via own node), `ordnet_price` (via own CoinGecko proxy)
+- **3 MCP Prompts** (`prompts/list`): inscribe-website, register-domain, agent-payment
+- **1SatOrdinals inscriptions** (HTML, JSON, text, images, etc.)
+- **SNS/OPNS domain registration** (.sats, .btc, .bsv, etc.)
+- **3-tier wallet security** (env vars → encrypted → plaintext; plaintext-WIF tools are disabled on the HTTP transport)
+- **Agent safety layer**: tx simulation via ORDnet's own node + spend limits with operator-set hard ceilings (fail-closed)
+- **HTTP transport with mandatory bearer auth** (`ORDNET_MCP_AUTH_TOKEN`, server refuses to start without it)
+- **Fee structure identical to ordmail-v10-standalone-026.html**: 396 sats service fees across 11 outputs / 10 addresses, miner fee 0.15 sat/byte (min. 200 sats)
+
+## Quick Start
+
+### Installation
+
+```bash
+git clone https://github.com/ORDNET/ORDnet-MCP-Server.git && cd ORDnet-MCP-Server
+npm install && npm run build
+```
+
+> Note: the package is not (yet) published on npm; install from source.
+
+### Usage with Claude Desktop
+
+Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "ordnet": {
+      "command": "npx",
+      "args": ["@ordnet/mcp-server"],
+      "env": {
+        "ORDNET_WIF": "your-wif-private-key"
+      }
+    }
+  }
+}
+```
+
+### Usage with OpenClaw
+
+```json
+{
+  "mcp_servers": [
+    {
+      "name": "ordnet",
+      "command": "node",
+      "args": ["/path/to/ordnet-mcp-server/dist/index.js"],
+      "env": {
+        "ORDNET_WIF": "your-wif-private-key"
+      }
+    }
+  ]
+}
+```
+
+## Service Fees
+
+All inscriptions include a service fee of **2,775 satoshis** distributed as follows:
+
+| Fee | Amount | Purpose |
+|-----|--------|---------|
+| Builders | 111 sats | Tool development |
+| Protocol | 222 sats | 1SAT protocol |
+| Monitor | 333 sats | WhatsOnChain |
+| Indexer | 444 sats | Gorillapool |
+| Creator | 777 sats | ARTaY |
+| Foundation | 888 sats | ORDnet.io |
+
+**Fee Address:** `1EXupec98g8TDTG5cwJwH3U8V3PezvvLv8`
+
+## Tools Reference
+
+### Wallet Management (6 tools)
+
+| Tool | Description |
+|------|-------------|
+| `ordnet_wallet_init` | Initialize wallet from WIF private key |
+| `ordnet_wallet_init_env` | Initialize from environment variable (recommended) |
+| `ordnet_wallet_status` | Check wallet status and balance |
+| `ordnet_wallet_balance` | Get balance for any BSV address |
+| `ordnet_wallet_utxos` | Get unspent transaction outputs |
+| `ordnet_wallet_clear` | Clear wallet from memory |
+
+### Inscriptions (6 tools)
+
+| Tool | Description |
+|------|-------------|
+| `ordnet_fee_estimate` | Calculate fee for an inscription |
+| `ordnet_inscribe_prepare` | Prepare inscription (no broadcast) |
+| `ordnet_inscribe_broadcast` | Broadcast prepared transaction |
+| `ordnet_inscribe_html` | Quick HTML inscription |
+| `ordnet_inscribe_json` | Quick JSON inscription |
+| `ordnet_inscribe_text` | Quick plain text inscription |
+
+### Domains (6 tools)
+
+| Tool | Description |
+|------|-------------|
+| `ordnet_domain_check` | Check domain availability |
+| `ordnet_domain_info` | Get domain information |
+| `ordnet_domain_search` | Search registered domains |
+| `ordnet_domain_register` | Register SNS/OPNS domain |
+| `ordnet_domain_register_sns` | Quick SNS registration |
+| `ordnet_domain_register_opns` | Quick OPNS registration |
+
+### Search & Lookup (4 tools)
+
+| Tool | Description |
+|------|-------------|
+| `ordnet_search_inscriptions` | Search inscriptions |
+| `ordnet_get_inscription` | Get inscription details |
+| `ordnet_get_content_url` | Get content URLs |
+| `ordnet_validate_address` | Validate BSV address |
+
+### Security (4 tools)
+
+| Tool | Description |
+|------|-------------|
+| `ordnet_security_encrypt_wallet` | Encrypt WIF with AES-256-GCM |
+| `ordnet_security_tier` | Check security tier |
+| `ordnet_security_validate_password` | Validate password strength |
+| `ordnet_generate_wallet` | Generate new random wallet |
+
+### Utilities (2 tools)
+
+| Tool | Description |
+|------|-------------|
+| `ordnet_info` | Server information |
+| `ordnet_content_types` | List supported content types |
+
+## Example: Create an HTML Inscription
+
+```
+User: Create a simple webpage saying "Hello from AI" and inscribe it on Bitcoin
+
+AI: I'll create and inscribe this HTML content on the BSV blockchain.
+
+1. First, let me initialize the wallet...
+   [ordnet_wallet_init_env]
+   ✓ Wallet initialized at 1ABC...
+
+2. Creating the HTML inscription...
+   [ordnet_inscribe_html] content="<html><body><h1>Hello from AI</h1></body></html>"
+   
+   ✓ Inscription successful!
+   - TXID: abc123...
+   - Inscription ID: abc123..._0
+   - View: https://ordnet.io/view/abc123..._0
+```
+
+## Supported Content Types
+
+- `text/html;charset=utf8` - HTML web pages
+- `text/plain;charset=utf8` - Plain text
+- `application/json` - JSON data
+- `image/svg+xml` - SVG graphics
+- `image/png` - PNG images
+- `image/jpeg` - JPEG images
+- `image/gif` - GIF animations
+- `image/webp` - WebP images
+- `audio/mpeg` - MP3 audio
+- `video/mp4` - MP4 video
+- `application/pdf` - PDF documents
+
+## Supported Domain Extensions
+
+### Universal
+- `.sats`
+
+### Chain-specific
+- **BTC:** `.btc` `.ord` `.xbt` `.gm` `.unisat` `.x`
+- **BSV:** `.bsv`
+- **DOGE:** `.doge` `.shibe`
+- **LTC:** `.ltc`
+- **BCH:** `.bch`
+- **BELLS:** `.bells`
+- **And more...**
+
+## Security Tiers
+
+| Tier | Method | Security Level |
+|------|--------|----------------|
+| Environment | `ORDNET_WIF` env var | ⭐⭐⭐ Highest |
+| Encrypted | AES-256-GCM encrypted store | ⭐⭐ Medium |
+| Plaintext | Direct WIF input | ⭐ Lowest |
+
+**Recommendation:** Always use environment variables in production.
+
+## Development
+
+```bash
+# Clone and install
+git clone https://github.com/ordnet/mcp-server
+cd mcp-server
+npm install
+
+# Build
+npm run build
+
+# Run tests
+node test/transaction-test.mjs
+
+# Start server (stdio)
+npm start
+
+# Start server (HTTP)
+TRANSPORT=http PORT=3000 npm start
+```
+
+## Transaction Structure
+
+Transactions are **byte-identical** to the reference inscriber (ORD-inscriber-pro-009.html):
+
+```
+Input:  UTXO (user funds)
+Output 0: 1 sat  - Inscription (OP_FALSE OP_IF "ord" ... OP_ENDIF + P2PKH)
+Output 1: 1 sat  - OP_RETURN "ORDnet.io"
+Output 2: 111 sats - Builders fee
+Output 3: 222 sats - Protocol fee
+Output 4: 333 sats - Monitor fee
+Output 5: 444 sats - Indexer fee
+Output 6: 777 sats - Creator fee
+Output 7: 888 sats - Foundation fee
+Output 8: Change (if > 546 sats)
+```
+
+## API Endpoints Used
+
+- **WhatsOnChain:** `https://api.whatsonchain.com/v1/bsv/main`
+- **ORDnet Registry:** `https://registry.ordnet.io`
+- **ORDnet Search:** `https://search.ordnet.io`
+
+## License
+
+MIT © ORDnet.io / Mister HHC B.V.
+
+## Links
+
+- Website: https://ordnet.io
+- Documentation: https://docs.ordnet.io
+- GitHub: https://github.com/ordnet
+
+
+## Environment Variables (v2.4)
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `ORDNET_WIF` | for wallet ops | Wallet private key (WIF). On HTTP transport this is the ONLY way to load a wallet. |
+| `TRANSPORT` | no | `stdio` (default) or `http`. |
+| `PORT` | no | HTTP port (default 3000). |
+| `ORDNET_MCP_AUTH_TOKEN` | **yes, when TRANSPORT=http** | Bearer token (min. 32 chars). Server refuses to start without it. Generate: `openssl rand -hex 32`. |
+| `ORDNET_POLICY_MAX_SATS_PER_TX` | recommended on http | Operator hard ceiling per transaction. `ordnet_policy_set` can tighten below it, never loosen above it. |
+| `ORDNET_POLICY_MAX_SATS_PER_SESSION` | recommended on http | Operator hard ceiling per server session. |
+| `ORDNET_UTXO_URL` | no | Base URL of the ordnet-utxo index (default `http://127.0.0.1:7002`). |
+
+## Known limitations
+
+- Wallet and spend-policy state are per server **process**, not per client session. Run the HTTP transport for a single trusted agent/team behind the auth token, not as a public multi-tenant service.
+- Balance and UTXO lookups use ORDnet's OWN address index (ordnet-utxo, port 7002, every UTXO node-verified) since v2.5; WhatsOnChain is a connectivity fallback only. New tools in v2.5: `ordnet_index_health`, `ordnet_address_watch`.
+- UTXO selection skips 1-sat UTXOs as ordinal protection and combines multiple inputs when needed.
