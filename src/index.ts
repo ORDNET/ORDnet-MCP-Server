@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
- * ORDnet MCP Server v2.3
+ * ORDnet MCP Server v3.1
  * 
  * Enable AI agents to create Web3 content on Bitcoin SV blockchain
  * 
  * Features:
- * - 28 tools for complete blockchain content creation
+ * - 45 tools for complete blockchain content creation
  * - 1SatOrdinals inscription support
  * - SNS/OPNS domain registration
  * - AES-256-GCM wallet security (3 tiers)
- * - Byte-identical transactions to ORD-inscriber-pro-009.html
+ * - Inscription output layout follows ordmail-v10-standalone-026.html
  * 
- * Service fees: 11+11+11+11+22+22+33+44+66+77+88 = 396 sats (per ordmail-v10-standalone-026.html)
- * Fee address: 1EXupec98g8TDTG5cwJwH3U8V3PezvvLv8
+ * Service fees: 11+11+11+11+22+22+33+44+66+77+88 = 396 sats across 11 outputs
+ *   (single source of truth: SERVICE_FEE_OUTPUTS in src/constants.ts)
  * 
  * @author ORDnet.io / Mister HHC B.V.
  * @license MIT
@@ -119,8 +119,7 @@ import {
   simulateTransaction,
   setPolicy,
   getPolicy,
-  enforcePolicy,
-  recordBroadcast
+  broadcastGuarded
 } from './services/policy.js';
 
 // Constants
@@ -655,9 +654,11 @@ Returns:
     try {
       // V3 safety layer: enforce spend policy (no-op when no limits are set)
       // v3.0.1: pass own address so change doesn't count against the limit
-      const simulation = await enforcePolicy(rawHex, getWalletAddress() ?? undefined);
-      const txid = await broadcastTransaction(rawHex);
-      recordBroadcast(simulation);
+      // K8: single guarded path. The raw hex was prepared elsewhere, so the
+      // miner fee is not known here; enforcePolicy still counts the outputs.
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, rawHex, getWalletAddress() ?? undefined
+      );
       const inscriptionId = getInscriptionId(txid);
       
       return {
@@ -719,7 +720,9 @@ Requires: Wallet must be initialized.`,
       }
       
       const prepared = await prepareInscription(content, CONTENT_TYPES.HTML, feePerByte);
-      const txid = await broadcastTransaction(prepared.rawHex);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, prepared.rawHex, getWalletAddress() ?? undefined, prepared.feeEstimate.minerFee
+      );
       const inscriptionId = getInscriptionId(txid);
       
       return {
@@ -784,7 +787,9 @@ Returns:
       }
       
       const prepared = await prepareInscription(content, CONTENT_TYPES.JSON, feePerByte);
-      const txid = await broadcastTransaction(prepared.rawHex);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, prepared.rawHex, getWalletAddress() ?? undefined, prepared.feeEstimate.minerFee
+      );
       const inscriptionId = getInscriptionId(txid);
       
       return {
@@ -841,7 +846,9 @@ Returns:
       }
       
       const prepared = await prepareInscription(content, CONTENT_TYPES.TEXT, feePerByte);
-      const txid = await broadcastTransaction(prepared.rawHex);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, prepared.rawHex, getWalletAddress() ?? undefined, prepared.feeEstimate.minerFee
+      );
       const inscriptionId = getInscriptionId(txid);
       
       return {
@@ -1082,7 +1089,9 @@ Requires: Wallet must be initialized.`,
       
       // Inscribe
       const prepared = await prepareInscription(registrationJson, CONTENT_TYPES.JSON, feePerByte);
-      const txid = await broadcastTransaction(prepared.rawHex);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, prepared.rawHex, getWalletAddress() ?? undefined, prepared.feeEstimate.minerFee
+      );
       const inscriptionId = getInscriptionId(txid);
       
       return {
@@ -1154,7 +1163,9 @@ Returns:
       });
       
       const prepared = await prepareInscription(registrationJson, CONTENT_TYPES.JSON, feePerByte);
-      const txid = await broadcastTransaction(prepared.rawHex);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, prepared.rawHex, getWalletAddress() ?? undefined, prepared.feeEstimate.minerFee
+      );
       const inscriptionId = getInscriptionId(txid);
       
       return {
@@ -1225,7 +1236,9 @@ Returns:
       });
       
       const prepared = await prepareInscription(registrationJson, CONTENT_TYPES.JSON, feePerByte);
-      const txid = await broadcastTransaction(prepared.rawHex);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, prepared.rawHex, getWalletAddress() ?? undefined, prepared.feeEstimate.minerFee
+      );
       const inscriptionId = getInscriptionId(txid);
       
       return {
@@ -1613,6 +1626,24 @@ Returns:
     }
   },
   async () => {
+    // H9 (external audit, 11 Aug 2026) — this returns a freshly minted WIF in
+    // the tool output. Over the remote HTTP transport that is a plaintext
+    // private key crossing the network, exactly what the IS_HTTP_TRANSPORT
+    // guard on ordnet_wallet_init and ordnet_security_encrypt_wallet exists to
+    // prevent. The guard was simply missing here. Generate keys locally
+    // (stdio), never over HTTP.
+    if (IS_HTTP_TRANSPORT) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            success: false,
+            error: 'This tool is disabled on the remote HTTP transport: it would return a freshly generated private key (WIF) over the network.',
+            suggestion: 'Generate the key locally with the server on the stdio transport, or use any offline BSV key generator, then provide it via ORDNET_WIF + ordnet_wallet_init_env.'
+          }, null, 2)
+        }]
+      };
+    }
     const wallet = generateWallet();
     
     return {
@@ -1629,7 +1660,7 @@ Returns:
 );
 
 // ============================================================================
-// TOOL CATEGORY 6: Utilities (2 tools)
+// TOOL CATEGORY 6: Payments, identity & utilities (19 tools)
 // ============================================================================
 
 server.registerTool(
@@ -1666,7 +1697,11 @@ Returns server version, capabilities, and service fee information.`,
             domains: 6,
             search: 4,
             security: 4,
-            utilities: 2
+            payments: 5,      // send, transfer, x402_quote, x402_fetch, derive_payment_address
+            identity: 3,      // identity, sign_message, verify_message
+            utilities: 11     // info, content_types, tx_simulate, policy_set, policy_status,
+                              // index_health, address_watch, bsvmap_inscribe, inscribe_binary,
+                              // tx_status, price
           },
           totalTools: 45,
           supportedContentTypes: Object.values(CONTENT_TYPES),
@@ -1977,9 +2012,9 @@ Returns:
       const wallet = requireWallet();
       const utxos = await fetchUTXOs(wallet.address);
       const payment = createPaymentTx(utxos, [{ address: to, satoshis }], opReturn);
-      const simulation = await enforcePolicy(payment.rawHex, wallet.address);
-      const txid = await broadcastTransaction(payment.rawHex);
-      recordBroadcast(simulation);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, payment.rawHex, wallet.address, payment.minerFee
+      );
       return {
         content: [{
           type: 'text',
@@ -2052,9 +2087,9 @@ Returns:
         to,
         utxos
       );
-      const simulation = await enforcePolicy(transfer.rawHex, wallet.address);
-      const txid = await broadcastTransaction(transfer.rawHex);
-      recordBroadcast(simulation);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, transfer.rawHex, wallet.address, transfer.minerFee
+      );
       return {
         content: [{
           type: 'text',
@@ -2256,7 +2291,7 @@ Returns:
   async ({ currencies = 'usd,eur' }) => {
     try {
       const url = `${API_ENDPOINTS.ORDNET_API}/proxy/coingecko/api/v3/simple/price?ids=bitcoin-cash-sv&vs_currencies=${encodeURIComponent(currencies)}`;
-      const resp = await fetch(url);
+      const resp = await withTimeout(url);
       const data = await resp.json() as any;
       const prices = data['bitcoin-cash-sv'] || data['bitcoin-sv'] || null;
       if (!prices) {
@@ -2589,15 +2624,32 @@ Returns:
 
       // Pay through the exact same machinery as ordnet_send (wallet + policy)
       const wallet = requireWallet();
+      // K8/H8 — the opReturnHint comes from the (untrusted) counterparty's 402
+      // response and drives the transaction size, hence the miner fee. A huge
+      // hint is a way to inflate the fee past what the policy would have caught
+      // if it only looked at the price. Cap it hard here; the miner fee is now
+      // counted by the guard, but there is no reason to build a bloated tx.
+      const opReturnHint = q.bsvOffer.extra?.opReturnHint;
+      if (typeof opReturnHint === 'string' && Buffer.byteLength(opReturnHint, 'utf8') > 1024) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              error: `Refused: the counterparty's opReturnHint is ${Buffer.byteLength(opReturnHint, 'utf8')} bytes (max 1024). An oversized hint inflates the miner fee.`,
+            }, null, 2)
+          }]
+        };
+      }
       const utxos = await fetchUTXOs(wallet.address);
       const payment = createPaymentTx(
         utxos,
         [{ address: q.bsvOffer.payTo, satoshis: priceSats }],
-        q.bsvOffer.extra?.opReturnHint
+        opReturnHint
       );
-      const simulation = await enforcePolicy(payment.rawHex, wallet.address);
-      const txid = await broadcastTransaction(payment.rawHex);
-      recordBroadcast(simulation);
+      const { txid } = await broadcastGuarded(
+        broadcastTransaction, payment.rawHex, wallet.address, payment.minerFee
+      );
 
       const result = await x402RetryWithProof(url, m, txid, q.bsvOffer.extra?.invoiceId);
       return {

@@ -15,8 +15,8 @@ export const API_ENDPOINTS = {
   WOC_BASE: 'https://api.whatsonchain.com/v1/bsv/main',
   
   // ORDnet services
-  ORDNET_REGISTRY: 'https://registry.ordnet.io',
-  ORDNET_API: 'https://api.ordnet.io',
+  ORDNET_REGISTRY: process.env.ORDNET_REGISTRY_URL || 'https://registry.ordnet.io',
+  ORDNET_API: process.env.ORDNET_API || 'https://api.ordnet.io',
   ORDNET_SEARCH: 'https://search.ordnet.io',
   ORDNET_PAY: 'https://pay.ordnet.io',
   ORDNET_SWAP: 'https://swap.ordnet.io',

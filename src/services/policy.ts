@@ -17,6 +17,7 @@
  */
 
 import { API_ENDPOINTS } from '../constants.js';
+import { withTimeout } from './net.js';
 
 // ============================================================================
 // Policy state (in-memory, per server process)
@@ -55,6 +56,8 @@ export const HARD_CEILINGS = {
   maxSatsPerSession: envCeiling('ORDNET_POLICY_MAX_SATS_PER_SESSION')
 } as const;
 
+export class PolicyViolationError extends Error {}
+
 const policy: SpendPolicy = {
   maxSatsPerTx: HARD_CEILINGS.maxSatsPerTx,
   maxSatsPerSession: HARD_CEILINGS.maxSatsPerSession,
@@ -81,6 +84,20 @@ export function setPolicy(opts: {
     policy.maxSatsPerSession = clampToCeiling(opts.maxSatsPerSession, HARD_CEILINGS.maxSatsPerSession);
   }
   if (opts.resetSession) {
+    // K8 (external audit, 11 Aug 2026) — resetSession used to be free: an
+    // agent could zero its own session counter and sidestep maxSatsPerSession
+    // entirely. When the OPERATOR has set a session ceiling via env, the
+    // agent may no longer reset the counter through this tool; only a fresh
+    // server process (a new operator-controlled session) resets it. With no
+    // operator ceiling there is nothing to protect, so a reset is still
+    // allowed for convenience.
+    if (HARD_CEILINGS.maxSatsPerSession !== null) {
+      throw new PolicyViolationError(
+        'resetSession is refused: the operator has set a session ceiling ' +
+        '(ORDNET_POLICY_MAX_SATS_PER_SESSION), and the session counter cannot ' +
+        'be reset from within the session. Restart the server to begin a new session.'
+      );
+    }
     policy.spentThisSession = 0;
     policy.broadcastCount = 0;
   }
@@ -109,6 +126,8 @@ export interface TxSimulation {
   totalOutputSats: number;
   /** Outputs excluding change back to the wallet's own address — what actually leaves the wallet. */
   spendSats: number;
+  /** Miner fee counted into spendSats (K8), when the builder supplied it. */
+  minerFee: number;
   outputs: SimulatedOutput[];
   warnings: string[];
 }
@@ -135,7 +154,7 @@ interface DecodedTx {
  * Returns a human/agent-readable summary with safety warnings.
  */
 export async function simulateTransaction(txHex: string): Promise<TxSimulation> {
-  const response = await fetch(`${API_ENDPOINTS.ORDNET_API}/v1/bsv/tx/decode`, {
+  const response = await withTimeout(`${API_ENDPOINTS.ORDNET_API}/v1/bsv/tx/decode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rawtx: txHex })
@@ -184,6 +203,7 @@ export async function simulateTransaction(txHex: string): Promise<TxSimulation> 
     outputCount: outputs.length,
     totalOutputSats,
     spendSats: totalOutputSats, // recomputed in enforcePolicy when ownAddress is known
+    minerFee: 0,
     outputs,
     warnings
   };
@@ -193,8 +213,6 @@ export async function simulateTransaction(txHex: string): Promise<TxSimulation> 
 // Policy enforcement (called before every broadcast)
 // ============================================================================
 
-export class PolicyViolationError extends Error {}
-
 /**
  * Enforce the active spend policy against a raw transaction.
  *
@@ -203,7 +221,7 @@ export class PolicyViolationError extends Error {}
  * - Limits configured -> simulates via ORDnet's own node and throws
  *   PolicyViolationError when a limit would be exceeded. Fail-closed.
  */
-export async function enforcePolicy(txHex: string, ownAddress?: string): Promise<TxSimulation | null> {
+export async function enforcePolicy(txHex: string, ownAddress?: string, knownMinerFee?: number): Promise<TxSimulation | null> {
   if (policy.maxSatsPerTx === null && policy.maxSatsPerSession === null) {
     return null;
   }
@@ -217,12 +235,27 @@ export async function enforcePolicy(txHex: string, ownAddress?: string): Promise
         .filter(o => o.address === ownAddress)
         .reduce((acc, o) => acc + o.satoshis, 0)
     : 0;
-  sim.spendSats = sim.totalOutputSats - changeSats;
+
+  // K8 (external audit, 11 Aug 2026) — count the miner fee.
+  // The decode only exposes OUTPUTS, so a policy that looked at outputs alone
+  // was blind to the miner fee: a hostile x402 counterparty could answer with
+  // a 1,000-sat price and a 10 MB opReturnHint, driving a ~1.5M-sat miner fee
+  // that enforcePolicy never saw. The builder always knows the fee it chose,
+  // so it is passed in here and added to what leaves the wallet. When it is
+  // not supplied, we fall back to deriving it from the decode where possible
+  // (own-node decodes may include a `fee`), and otherwise over-count by not
+  // subtracting change — safety over precision.
+  const minerFee = Number.isFinite(knownMinerFee as number) && (knownMinerFee as number) >= 0
+    ? Math.round(knownMinerFee as number)
+    : 0;
+  sim.minerFee = minerFee;
+  sim.spendSats = (sim.totalOutputSats - changeSats) + minerFee;
 
   if (policy.maxSatsPerTx !== null && sim.spendSats > policy.maxSatsPerTx) {
     throw new PolicyViolationError(
       `Blocked by spend policy: transaction spends ${sim.spendSats} sats ` +
-      `(outputs ${sim.totalOutputSats} minus ${changeSats} change to own address), ` +
+      `(outputs ${sim.totalOutputSats} minus ${changeSats} change to own address, ` +
+      `plus ${minerFee} miner fee), ` +
       `which exceeds maxSatsPerTx (${policy.maxSatsPerTx}). ` +
       `Adjust the policy with ordnet_policy_set if this is intentional.`
     );
@@ -249,4 +282,31 @@ export function recordBroadcast(sim: TxSimulation | null): void {
     policy.spentThisSession += sim.spendSats;
   }
   policy.broadcastCount += 1;
+}
+
+// ============================================================================
+// K8 — the single guarded broadcast path
+// ============================================================================
+//
+// The audit found the spend policy wired into only 3 of 9 broadcast paths:
+// the other 6 (inscribe_html/json/text, domain_register x3) called
+// broadcastTransaction() directly, so the limit an operator set simply did
+// not apply to them. The root cause is that "enforce, broadcast, record" was
+// three separate calls a tool author had to remember in the right order.
+//
+// broadcastGuarded() makes that impossible to get wrong: it is the ONLY way a
+// tool broadcasts. It enforces the policy (counting the miner fee the builder
+// chose), broadcasts, and records — atomically, in order. A new broadcast
+// tool that forgets the policy cannot be written without also forgetting to
+// broadcast, because the broadcast lives inside the guard.
+export async function broadcastGuarded(
+  broadcastFn: (rawHex: string) => Promise<string>,
+  rawHex: string,
+  ownAddress?: string,
+  knownMinerFee?: number
+): Promise<{ txid: string; simulation: TxSimulation | null }> {
+  const simulation = await enforcePolicy(rawHex, ownAddress, knownMinerFee);
+  const txid = await broadcastFn(rawHex);
+  recordBroadcast(simulation);
+  return { txid, simulation };
 }

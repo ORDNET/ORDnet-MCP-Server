@@ -270,7 +270,11 @@ export const AddressWatchSchema = z.object({
 // v2.7: payment, transfer, bsvmap, status, price
 export const SendSchema = z.object({
   to: z.string().min(26).max(35).describe('Recipient BSV address'),
-  satoshis: z.number().int().min(1).describe('Amount in satoshis'),
+  // Upper bound = the entire BSV supply in satoshis (21,000,000 * 1e8). A send
+  // cannot legitimately exceed it; capping here stops a wild value from
+  // reaching the builder and the fee math. The spend policy is the real spend
+  // guard — this is just a sanity ceiling on a single field.
+  satoshis: z.number().int().min(1).max(2_100_000_000_000_000).describe('Amount in satoshis'),
   opReturn: z.string().max(100000).optional().describe('Optional OP_RETURN data (e.g. a payment reference for x402)')
 }).strict();
 

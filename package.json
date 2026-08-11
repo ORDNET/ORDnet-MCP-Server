@@ -1,6 +1,6 @@
 {
   "name": "@ordnet/mcp-server",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "ORDnet MCP Server - Enable AI agents to create Web3 content on Bitcoin SV blockchain",
   "type": "module",
   "main": "dist/index.js",

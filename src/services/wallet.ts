@@ -7,6 +7,7 @@
 
 // @ts-ignore - bsv v1.x has no TypeScript definitions
 import bsv from 'bsv';
+import { withTimeout } from './net.js';
 import { API_ENDPOINTS, UTXO_INDEX_BASE, TX_CONSTANTS } from '../constants.js';
 import type { 
   UTXO, 
@@ -101,7 +102,7 @@ interface IndexUtxosResponse {
 class IndexAuthoritativeError extends Error {}
 
 async function indexGet(path: string): Promise<any> {
-  const response = await fetch(`${UTXO_INDEX_BASE}${path}`);
+  const response = await withTimeout(`${UTXO_INDEX_BASE}${path}`);
   if (response.ok) return response.json();
   const body = await response.text().catch(() => '');
   if (response.status >= 400 && response.status < 500) {
@@ -127,7 +128,7 @@ export async function fetchBalance(address: string): Promise<WalletBalance> {
     console.error(`[wallet] own index failed, falling back to WOC: ${error instanceof Error ? error.message : error}`);
   }
 
-  const response = await fetch(`${API_ENDPOINTS.WOC_BASE}/address/${address}/balance`);
+  const response = await withTimeout(`${API_ENDPOINTS.WOC_BASE}/address/${address}/balance`);
   if (!response.ok) {
     throw new Error(`Failed to fetch balance (index down, WOC HTTP ${response.status})`);
   }
@@ -152,7 +153,7 @@ export async function fetchUTXOs(address: string, limit: number = 50): Promise<U
   } catch (error) {
     if (error instanceof IndexAuthoritativeError) throw error;
     console.error(`[wallet] own index failed, falling back to WOC: ${error instanceof Error ? error.message : error}`);
-    const response = await fetch(`${API_ENDPOINTS.WOC_BASE}/address/${address}/unspent`);
+    const response = await withTimeout(`${API_ENDPOINTS.WOC_BASE}/address/${address}/unspent`);
     if (!response.ok) {
       throw new Error(`Failed to fetch UTXOs (index down, WOC HTTP ${response.status})`);
     }
@@ -187,13 +188,13 @@ export async function fetchUTXOs(address: string, limit: number = 50): Promise<U
  * v2.5: index health + watchlist registration (used by the new MCP tools).
  */
 export async function fetchIndexHealth(): Promise<{ status: string; index_height: number; node_height: number }> {
-  const response = await fetch(`${UTXO_INDEX_BASE}/health`);
+  const response = await withTimeout(`${UTXO_INDEX_BASE}/health`);
   if (!response.ok) throw new Error(`ordnet-utxo health failed: HTTP ${response.status}`);
   return response.json() as Promise<{ status: string; index_height: number; node_height: number }>;
 }
 
 export async function watchAddress(address: string, label?: string): Promise<any> {
-  const response = await fetch(`${UTXO_INDEX_BASE}/v1/watch`, {
+  const response = await withTimeout(`${UTXO_INDEX_BASE}/v1/watch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ address, label: label || 'mcp' })
@@ -212,7 +213,7 @@ export async function watchAddress(address: string, label?: string): Promise<any
 export async function broadcastTransaction(txHex: string): Promise<string> {
   // --- Primary: own ORDnet node ---
   try {
-    const response = await fetch(`${API_ENDPOINTS.ORDNET_API}/v1/bsv/tx/broadcast`, {
+    const response = await withTimeout(`${API_ENDPOINTS.ORDNET_API}/v1/bsv/tx/broadcast`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -245,7 +246,7 @@ export async function broadcastTransaction(txHex: string): Promise<string> {
   }
 
   // --- Fallback: WhatsOnChain (connectivity issues only) ---
-  const response = await fetch(`${API_ENDPOINTS.WOC_BASE}/tx/raw`, {
+  const response = await withTimeout(`${API_ENDPOINTS.WOC_BASE}/tx/raw`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'

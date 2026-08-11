@@ -11,6 +11,28 @@
  * honestly as unsupported instead of guessed at.
  */
 
+import { safeFetch } from './net.js';
+
+/**
+ * safeFetch with manual redirects re-vetted through the same SSRF guard.
+ * A server can 402/200 directly, or 3xx to another public URL; each hop is
+ * checked, and more than 5 hops is refused.
+ */
+async function followSafely(url: string, init: RequestInit, maxHops = 5): Promise<Response> {
+  let current = url;
+  for (let hop = 0; hop <= maxHops; hop++) {
+    const res = await safeFetch(current, init);
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (!loc) return res;
+      current = new URL(loc, current).toString(); // safeFetch re-vets on next loop
+      continue;
+    }
+    return res;
+  }
+  throw new Error('Refused: too many redirects.');
+}
+
 export interface X402Requirements {
   scheme: string;
   network: string;
@@ -34,7 +56,11 @@ export interface X402Quote {
 
 /** Request a URL without paying; parse the 402 quote when present. */
 export async function x402Quote(url: string, method: string = 'GET'): Promise<X402Quote> {
-  const response = await fetch(url, { method });
+  // H8: the URL is agent-supplied and this path is often auto-approved
+  // (readOnlyHint). safeFetch refuses private/loopback/metadata targets and
+  // applies a timeout. Redirects are manual so a 3xx to an internal host is
+  // followed only after the same guard re-vets the new location.
+  const response = await followSafely(url, { method });
   const text = await response.text();
   let body: unknown = text;
   try { body = JSON.parse(text); } catch { /* non-JSON body is fine */ }
@@ -79,7 +105,7 @@ export async function x402RetryWithProof(
     network: 'bsv',
     payload: { txid, ...(invoiceId ? { invoiceId } : {}) }
   };
-  const response = await fetch(url, {
+  const response = await followSafely(url, {
     method,
     headers: { 'X-PAYMENT': Buffer.from(JSON.stringify(payload)).toString('base64') }
   });

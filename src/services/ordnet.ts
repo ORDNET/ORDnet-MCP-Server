@@ -5,6 +5,7 @@
  */
 
 import { API_ENDPOINTS } from '../constants.js';
+import { withTimeout } from './net.js';
 import type { DomainInfo, SearchResult, RegistryEntry } from '../types.js';
 
 // ============================================================================
@@ -20,7 +21,7 @@ export async function checkDomainAvailability(
 ): Promise<{ available: boolean; owner?: string; inscriptionId?: string }> {
   try {
     const fullName = name.includes('.') ? name : `${name}${extension}`;
-    const response = await fetch(
+    const response = await withTimeout(
       `${API_ENDPOINTS.ORDNET_REGISTRY}/api/v1/domain/${encodeURIComponent(fullName)}`
     );
     
@@ -51,7 +52,7 @@ export async function checkDomainAvailability(
  */
 export async function getDomainInfo(fullName: string): Promise<DomainInfo | null> {
   try {
-    const response = await fetch(
+    const response = await withTimeout(
       `${API_ENDPOINTS.ORDNET_REGISTRY}/api/v1/domain/${encodeURIComponent(fullName)}`
     );
     
@@ -90,7 +91,7 @@ export async function searchDomains(
   limit: number = 20
 ): Promise<DomainInfo[]> {
   try {
-    const response = await fetch(
+    const response = await withTimeout(
       `${API_ENDPOINTS.ORDNET_SEARCH}/api/v1/domains?q=${encodeURIComponent(query)}&limit=${limit}`
     );
     
@@ -139,7 +140,7 @@ export async function searchInscriptions(
       url += `&type=${encodeURIComponent(contentType)}`;
     }
     
-    const response = await fetch(url);
+    const response = await withTimeout(url);
     
     if (!response.ok) {
       throw new Error(`Search API error: HTTP ${response.status}`);
@@ -156,7 +157,7 @@ export async function searchInscriptions(
  */
 export async function getInscription(inscriptionId: string): Promise<SearchResult | null> {
   try {
-    const response = await fetch(
+    const response = await withTimeout(
       `${API_ENDPOINTS.ORDNET_REGISTRY}/api/v1/inscription/${encodeURIComponent(inscriptionId)}`
     );
     

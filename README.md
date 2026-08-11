@@ -72,18 +72,29 @@ Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json`
 
 ## Service Fees
 
-All inscriptions include a service fee of **2,775 satoshis** distributed as follows:
+Every inscription includes a total service fee of **396 satoshis**, split
+across **11 outputs** exactly as defined in `src/constants.ts`
+(`SERVICE_FEE_OUTPUTS`). These are the values the code actually writes:
 
-| Fee | Amount | Purpose |
-|-----|--------|---------|
-| Builders | 111 sats | Tool development |
-| Protocol | 222 sats | 1SAT protocol |
-| Monitor | 333 sats | WhatsOnChain |
-| Indexer | 444 sats | Gorillapool |
-| Creator | 777 sats | ARTaY |
-| Foundation | 888 sats | ORDnet.io |
+| Label | Amount | Address |
+|-------|--------|---------|
+| ordiBuilder | 11 sats | `1HdbyucjYU2yfDFXzAQt3kCdP3VvM4tjzr` |
+| onnoBuilder | 11 sats | `1JKcD1kx8XeJFfd32sug1MaXfruurHTCjv` |
+| algoBuilder | 11 sats | `1AHEUcWuCfdRnfwNsvwZhZSetXjEuAvBot` |
+| colleagueI | 11 sats | `1ENW3XBoAv4KQ4FuQ4MtzNkLq82eJd12PV` |
+| protocol | 22 sats | `15q8YQSqUa9uTh6gh4AVixxq29xkpBBP9z` |
+| colleagueD | 22 sats | `1GeifRjPLWTDqL1DZ2vaqorX6pqCi9PyJB` |
+| monitor | 33 sats | `1EXupec98g8TDTG5cwJwH3U8V3PezvvLv8` |
+| indexer | 44 sats | `18RHRqQhsKKZwMnGevvnRQ8KrryAXvQUWQ` |
+| partner | 66 sats | `19o4rByWRvdq6zziJEfhpe4xdq5z43jYrr` |
+| founder | 77 sats | `1EXupec98g8TDTG5cwJwH3U8V3PezvvLv8` |
+| foundation | 88 sats | `1ATEXPH6FSctbZdAz8MnXCfDpCvDnFrWma` |
+| **Total** | **396 sats** | 11 outputs |
 
-**Fee Address:** `1EXupec98g8TDTG5cwJwH3U8V3PezvvLv8`
+Miner fee is separate: `0.15 sat/byte`, minimum 200 sats.
+
+> Note: `ordnet_send` (plain payments / x402 micropayments) carries **no**
+> service fee — only the miner fee — so agent-to-agent payments stay lean.
 
 ## Tools Reference
 
@@ -138,12 +149,41 @@ All inscriptions include a service fee of **2,775 satoshis** distributed as foll
 | `ordnet_security_validate_password` | Validate password strength |
 | `ordnet_generate_wallet` | Generate new random wallet |
 
-### Utilities (2 tools)
+### Payments (5 tools)
+
+| Tool | Description |
+|------|-------------|
+| `ordnet_send` | Plain BSV payment (miner fee only, no service fee) |
+| `ordnet_transfer` | Transfer an ordinal/domain to another address |
+| `ordnet_x402_quote` | Probe an x402-paywalled URL and parse the quote (SSRF-guarded) |
+| `ordnet_x402_fetch` | Pay an x402 resource in native sats and retrieve it |
+| `ordnet_derive_payment_address` | Derive a BRC-42 payment address (watch-only) |
+
+### Identity & signing (3 tools)
+
+| Tool | Description |
+|------|-------------|
+| `ordnet_identity` | Get the wallet's identity public key |
+| `ordnet_sign_message` | Sign a message with the wallet key |
+| `ordnet_verify_message` | Verify a signed message |
+
+### Utilities (11 tools)
 
 | Tool | Description |
 |------|-------------|
 | `ordnet_info` | Server information |
 | `ordnet_content_types` | List supported content types |
+| `ordnet_tx_simulate` | Decode/simulate a raw tx via ORDnet's own node |
+| `ordnet_policy_set` | Set spend-policy limits (within operator ceilings) |
+| `ordnet_policy_status` | Show the active spend policy and session total |
+| `ordnet_index_health` | UTXO index health |
+| `ordnet_address_watch` | Add an address to the watch index |
+| `ordnet_bsvmap_inscribe` | Inscribe a BSVmap tile |
+| `ordnet_inscribe_binary` | Inscribe binary content (e.g. an image) |
+| `ordnet_tx_status` | Look up a transaction's status |
+| `ordnet_price` | BSV price in fiat |
+
+**Total: 45 tools.**
 
 ## Example: Create an HTML Inscription
 
@@ -214,8 +254,9 @@ npm install
 # Build
 npm run build
 
-# Run tests
-node test/transaction-test.mjs
+# Run the audit regression tests (SSRF guard + spend policy).
+# These run straight from source with Node's type stripping:
+node --experimental-strip-types test/audit-2026-08-11.test.mjs
 
 # Start server (stdio)
 npm start
@@ -226,20 +267,21 @@ TRANSPORT=http PORT=3000 npm start
 
 ## Transaction Structure
 
-Transactions are **byte-identical** to the reference inscriber (ORD-inscriber-pro-009.html):
+The inscription transaction follows the same output layout as the reference
+inscriber (`ordmail-v10-standalone-026.html`). The service-fee outputs are the
+11 entries of `SERVICE_FEE_OUTPUTS` in `src/constants.ts`:
 
 ```
-Input:  UTXO (user funds)
-Output 0: 1 sat  - Inscription (OP_FALSE OP_IF "ord" ... OP_ENDIF + P2PKH)
-Output 1: 1 sat  - OP_RETURN "ORDnet.io"
-Output 2: 111 sats - Builders fee
-Output 3: 222 sats - Protocol fee
-Output 4: 333 sats - Monitor fee
-Output 5: 444 sats - Indexer fee
-Output 6: 777 sats - Creator fee
-Output 7: 888 sats - Foundation fee
-Output 8: Change (if > 546 sats)
+Input:   UTXO(s) (user funds)
+Output 0:  1 sat    - Inscription (OP_FALSE OP_IF "ord" ... OP_ENDIF + P2PKH)
+Output 1:  0 sat    - OP_RETURN "ORDnet.io"
+Output 2..12:        - 11 service-fee outputs (11,11,11,11,22,22,33,44,66,77,88 = 396 sats)
+Output 13: Change (if > 546 sats)
 ```
+
+The exact per-output amounts and addresses are listed under **Service Fees**
+above and are the single source of truth (`SERVICE_FEE_OUTPUTS`). `ordnet_send`
+omits the fee outputs entirely.
 
 ## API Endpoints Used
 
