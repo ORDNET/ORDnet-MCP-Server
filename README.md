@@ -1,8 +1,8 @@
-# ORDnet MCP Server v3.1
+# ORDnet MCP Server v3.2
 
 > Enable AI agents to create Web3 content on Bitcoin SV blockchain
 
-[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](https://github.com/ORDNET/ORDnet-MCP-Server)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/ORDNET/ORDnet-MCP-Server)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## Overview
@@ -11,7 +11,7 @@ ORDnet MCP Server enables AI agents (Claude, GPT, etc.) to create permanent, cen
 
 ### Key Features
 
-- **43 MCP Tools** for complete blockchain content creation, payments and transfers
+- **45 MCP Tools** for complete blockchain content creation, payments and transfers
 - **BRC-100 aligned identity** (v3.0): `ordnet_identity`, `ordnet_sign_message`, `ordnet_verify_message`, `ordnet_derive_payment_address` — agent identity, off-chain signing, and per-invoice payment-address derivation as the foundation for x402
 - **Agent payments**: `ordnet_send` (P2PKH + optional OP_RETURN reference, miner fee only — x402-ready), `ordnet_transfer` for ordinals/domains (1SatOrdinals input-0/output-0 semantics, outpoint verified via own node)
 - **Binary inscriptions** via `ordnet_inscribe_binary` (base64 → bytes untouched); BSVmap tile claims via `ordnet_bsvmap_inscribe`
@@ -22,7 +22,7 @@ ORDnet MCP Server enables AI agents (Claude, GPT, etc.) to create permanent, cen
 - **3-tier wallet security** (env vars → encrypted → plaintext; plaintext-WIF tools are disabled on the HTTP transport)
 - **Agent safety layer**: tx simulation via ORDnet's own node + spend limits with operator-set hard ceilings (fail-closed)
 - **HTTP transport with mandatory bearer auth** (`ORDNET_MCP_AUTH_TOKEN`, server refuses to start without it)
-- **Fee structure identical to ordmail-v10-standalone-026.html**: 396 sats service fees across 11 outputs / 10 addresses, miner fee 0.15 sat/byte (min. 200 sats)
+- **Agent-tier service fee**: **396 satoshis** across 11 outputs to 10 addresses, plus a miner fee of 0.15 sat/byte (min. 200 sats). That is deliberately **one tenth** of the 3.996-satoshi fee the ORDnet wallets charge — an agent inscribes far more often than a person does, so the per-transaction fee is scaled down to match. The same agent tier applies to ORDmail. See [Service fees](#service-fees) for the exact split.
 
 ## Quick Start
 
@@ -43,8 +43,8 @@ Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json`
 {
   "mcpServers": {
     "ordnet": {
-      "command": "npx",
-      "args": ["@ordnet/mcp-server"],
+      "command": "node",
+      "args": ["/absolute/path/to/ORDnet-MCP-Server/dist/index.js"],
       "env": {
         "ORDNET_WIF": "your-wif-private-key"
       }
@@ -73,8 +73,9 @@ Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json`
 ## Service Fees
 
 Every inscription includes a total service fee of **396 satoshis**, split
-across **11 outputs** exactly as defined in `src/constants.ts`
-(`SERVICE_FEE_OUTPUTS`). These are the values the code actually writes:
+across **11 outputs** to 10 addresses (monitor and founder share one),
+exactly as defined in `src/constants.ts` (`SERVICE_FEE_OUTPUTS`). These are
+the values the code actually writes:
 
 | Label | Amount | Address |
 |-------|--------|---------|
@@ -93,8 +94,23 @@ across **11 outputs** exactly as defined in `src/constants.ts`
 
 Miner fee is separate: `0.15 sat/byte`, minimum 200 sats.
 
+### Why 396 and not 3.996
+
+The ORDnet wallets (Chrome extension, iOS, Android) charge **3.996 satoshis**
+over the same 11-output structure — every amount is exactly ten times the one
+above. That is not a discrepancy between products: agents and mail run on a
+deliberately reduced **agent tier**, because an autonomous agent inscribes far
+more often than a person opening a wallet. The split across recipients is
+identical; only the scale differs.
+
+| Tier | Products | Total per inscription |
+|---|---|---|
+| Wallet | Chrome extension, iOS, Android | 3.996 sats |
+| Agent | this MCP server, ORDmail | 396 sats |
+
 > Note: `ordnet_send` (plain payments / x402 micropayments) carries **no**
 > service fee — only the miner fee — so agent-to-agent payments stay lean.
+> The x402 facilitator has no service-fee outputs at all.
 
 ## Tools Reference
 
@@ -247,7 +263,7 @@ AI: I'll create and inscribe this HTML content on the BSV blockchain.
 
 ```bash
 # Clone and install
-git clone https://github.com/ordnet/mcp-server
+git clone https://github.com/ORDNET/ORDnet-MCP-Server.git
 cd mcp-server
 npm install
 
@@ -296,11 +312,11 @@ MIT © ORDnet.io / Mister HHC B.V.
 ## Links
 
 - Website: https://ordnet.io
-- Documentation: https://docs.ordnet.io
+- Documentation: this README is the reference for the MCP server. (https://docs.ordnet.io documents the ORD/apps suite, not this server.)
 - GitHub: https://github.com/ordnet
 
 
-## Environment Variables (v2.4)
+## Environment Variables
 
 | Variable | Required | Purpose |
 |---|---|---|
@@ -311,6 +327,7 @@ MIT © ORDnet.io / Mister HHC B.V.
 | `ORDNET_POLICY_MAX_SATS_PER_TX` | recommended on http | Operator hard ceiling per transaction. `ordnet_policy_set` can tighten below it, never loosen above it. |
 | `ORDNET_POLICY_MAX_SATS_PER_SESSION` | recommended on http | Operator hard ceiling per server session. |
 | `ORDNET_UTXO_URL` | no | Base URL of the ordnet-utxo index (default `http://127.0.0.1:7002`). |
+| `ORDNET_API` | no | Base URL of the ORDnet API used for price and proxy calls (default `https://api.ordnet.io`). |
 
 ## Known limitations
 
