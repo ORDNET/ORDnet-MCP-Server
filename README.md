@@ -1,8 +1,8 @@
-# ORDnet MCP Server v3.2
+# ORDnet MCP Server v3.3
 
 > Enable AI agents to create Web3 content on Bitcoin SV blockchain
 
-[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/ORDNET/ORDnet-MCP-Server)
+[![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](https://github.com/ORDNET/ORDnet-MCP-Server)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## Overview

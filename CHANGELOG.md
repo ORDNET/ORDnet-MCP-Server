@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.3.2] — 2026-08-13 — audit round 4
+
+### Fixed
+
+- **`npm test` now runs the real regression suite** (`test/run.mjs`, bare Node
+  with type-stripping — no install step). It previously ran
+  `node dist/index.js --test`, which *started the server*, so a green test run
+  proved nothing.
+- **Policy ceilings are parsed over the full string.** `parseInt` stops at the
+  first non-digit, so `ORDNET_POLICY_MAX_SATS_PER_TX=1e9` silently became a
+  **1-sat** limit — a value the operator never chose. Such values are now
+  refused and fall back to the default instead.
+- **Version alignment:** the version strings the server reports (MCP
+  initialize response, `/health`) match `package.json` again; they were stuck
+  at 3.1.0.
+
+### Tests
+
+- 28, up from 27 — including one that feeds the exact truncation-prone values
+  to the ceiling parser.
+
+## [3.3.0] — 2026-08-13 — audit round 2
+
+Second round of the external review. Full detail in
+[SECURITY-FIXES-v3.3.0.md](SECURITY-FIXES-v3.3.0.md).
+
+### Security
+
+- **The spend policy was open by default.** `maxSatsPerTx` and
+  `maxSatsPerSession` shipped as `null` and `enforcePolicy()` returned early on
+  `null` — out of the box there was no limit at all, while the search tools
+  spread on-chain (attacker-writable) content unfiltered into the agent's
+  context. Prompt injection → unlimited `ordnet_send`. The defaults are now
+  real ceilings: 100.000 sats per transaction, 1.000.000 per session. Raising
+  them requires the environment variables; opting out requires the literal
+  string `unlimited`, which logs a warning. A malformed value falls back to the
+  default, not to `null`.
+
+### Tests
+
+- 27, up from 23 — a fresh install with a cleared environment must refuse a
+  0.5 BSV send, and nothing may reach the network when the policy blocks.
+
 ## [3.2.0] — 2026-08-11 — external security audit
 
 An external review of all ORDnet repositories on 11 August 2026 reported one
