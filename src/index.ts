@@ -190,7 +190,7 @@ function httpWifBlockedResponse() {
 
 const server = new McpServer({
   name: 'ordnet-mcp-server',
-  version: '3.1.0'
+  version: '3.3.2'
 });
 
 // ============================================================================
@@ -1690,7 +1690,7 @@ Returns server version, capabilities, and service fee information.`,
         type: 'text',
         text: JSON.stringify({
           name: 'ORDnet MCP Server',
-          version: '3.1.0',
+          version: '3.3.2',
           description: 'Enable AI agents to create Web3 content on Bitcoin SV blockchain',
           author: 'ORDnet.io / Mister HHC B.V.',
           serviceFees: {
@@ -2769,7 +2769,7 @@ async function runHTTP(): Promise<void> {
   app.use(express.json({ limit: '2mb' }));
 
   app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', version: '3.1.0' });
+    res.json({ status: 'ok', version: '3.3.2' });
   });
 
   // Bearer auth on everything except /health
