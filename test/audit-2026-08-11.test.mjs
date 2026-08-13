@@ -36,6 +36,12 @@ const fakeNode = createServer((req, res) => {
 await new Promise(r => fakeNode.listen(0, '127.0.0.1', r));
 const port = fakeNode.address().port;
 process.env.ORDNET_API = `http://127.0.0.1:${port}`;
+// This suite exercises the policy machinery itself, so it opts out of the
+// operator ceilings deliberately — otherwise every setPolicy({resetSession})
+// below would be refused, which is exactly the behaviour asserted further down.
+// The DEFAULTS get their own assertions in the block at the end.
+process.env.ORDNET_POLICY_MAX_SATS_PER_TX = 'unlimited';
+process.env.ORDNET_POLICY_MAX_SATS_PER_SESSION = 'unlimited';
 
 const { isBlockedIp, safeFetch } = await import('../src/services/net.ts');
 const {
@@ -108,18 +114,95 @@ await t('change to own address is excluded, fee still counted', async () => {
   assert.equal(sim.minerFee, 2000);
 });
 
-await t('agent cannot reset the session when operator set a session ceiling', () => {
-  // Simulate an operator ceiling by forcing HARD_CEILINGS at runtime is not
-  // possible (frozen), so assert the guard logic via a session ceiling set
-  // through env-independent behaviour: when HARD_CEILINGS.maxSatsPerSession is
-  // null (default in this test process) the reset is allowed — we assert that
-  // path here, and the env-gated refusal is asserted in the note below.
+await t('agent cannot reset the session when a session ceiling exists', () => {
   if (HARD_CEILINGS.maxSatsPerSession === null) {
     const p = setPolicy({ resetSession: true });
     assert.equal(p.spentThisSession, 0);
   } else {
     assert.throws(() => setPolicy({ resetSession: true }), PolicyViolationError);
   }
+});
+
+/* ------------------------------------------------------------------ *
+ * The spend policy must be fail-closed out of the box.
+ *
+ * Both ceilings previously defaulted to null, and enforcePolicy() returns
+ * early when both are null — so a freshly installed server enforced nothing
+ * and ordnet_send would broadcast any amount an agent asked for. On-chain
+ * content flows into that agent's context and anyone can inscribe for under
+ * a cent, so "no default limit" completed a path from prompt injection to a
+ * drained wallet.
+ * ------------------------------------------------------------------ */
+await t('an unset environment yields real ceilings, not null', async () => {
+  const saveTx = process.env.ORDNET_POLICY_MAX_SATS_PER_TX;
+  const saveSes = process.env.ORDNET_POLICY_MAX_SATS_PER_SESSION;
+  delete process.env.ORDNET_POLICY_MAX_SATS_PER_TX;
+  delete process.env.ORDNET_POLICY_MAX_SATS_PER_SESSION;
+  const fresh = await import('../src/services/policy.ts?defaults=' + Date.now());
+  assert.equal(typeof fresh.HARD_CEILINGS.maxSatsPerTx, 'number');
+  assert.equal(typeof fresh.HARD_CEILINGS.maxSatsPerSession, 'number');
+  assert.ok(fresh.HARD_CEILINGS.maxSatsPerTx > 0);
+  assert.ok(fresh.HARD_CEILINGS.maxSatsPerSession >= fresh.HARD_CEILINGS.maxSatsPerTx);
+  if (saveTx !== undefined) process.env.ORDNET_POLICY_MAX_SATS_PER_TX = saveTx;
+  if (saveSes !== undefined) process.env.ORDNET_POLICY_MAX_SATS_PER_SESSION = saveSes;
+});
+
+await t('a default-configured server blocks an oversized send', async () => {
+  const saveTx = process.env.ORDNET_POLICY_MAX_SATS_PER_TX;
+  const saveSes = process.env.ORDNET_POLICY_MAX_SATS_PER_SESSION;
+  delete process.env.ORDNET_POLICY_MAX_SATS_PER_TX;
+  delete process.env.ORDNET_POLICY_MAX_SATS_PER_SESSION;
+  const fresh = await import('../src/services/policy.ts?blocks=' + Date.now());
+  let broadcast = false;
+  await assert.rejects(
+    () => fresh.broadcastGuarded(
+      async () => { broadcast = true; return 'x'.repeat(64); },
+      mkHex([{ sats: 50_000_000, addr: 'stranger' }]), 'me', 1000),
+    fresh.PolicyViolationError,
+    'a 0.5 BSV send must be refused by the default ceiling'
+  );
+  assert.equal(broadcast, false, 'nothing may reach the network when the policy blocks');
+  if (saveTx !== undefined) process.env.ORDNET_POLICY_MAX_SATS_PER_TX = saveTx;
+  if (saveSes !== undefined) process.env.ORDNET_POLICY_MAX_SATS_PER_SESSION = saveSes;
+});
+
+await t('"unlimited" is honoured but must be spelled out', async () => {
+  process.env.ORDNET_POLICY_MAX_SATS_PER_TX = 'unlimited';
+  const fresh = await import('../src/services/policy.ts?unlimited=' + Date.now());
+  assert.equal(fresh.HARD_CEILINGS.maxSatsPerTx, null);
+});
+
+await t('a malformed ceiling falls back to the default instead of to null', async () => {
+  process.env.ORDNET_POLICY_MAX_SATS_PER_TX = 'lots';
+  const fresh = await import('../src/services/policy.ts?bad=' + Date.now());
+  assert.equal(typeof fresh.HARD_CEILINGS.maxSatsPerTx, 'number');
+  process.env.ORDNET_POLICY_MAX_SATS_PER_TX = 'unlimited';
+});
+
+await t('a value parseInt would silently truncate is refused, not accepted', async () => {
+  // parseInt('1e9') === 1 and parseInt('100_000') === 100. Both are > 0, so an
+  // operator writing a perfectly reasonable-looking number would have ended up
+  // with a one-satoshi ceiling and no warning.
+  for (const [raw, why] of [
+    ['1e9', 'exponent notation'],
+    ['100_000', 'underscore separator'],
+    ['1,000,000', 'thousands separators'],
+    ['0.5', 'a decimal'],
+    ['10 BSV', 'a unit suffix'],
+    ['  500  ', 'padded — this one is fine'],
+    ['-100', 'negative']
+  ]) {
+    process.env.ORDNET_POLICY_MAX_SATS_PER_TX = raw;
+    const fresh = await import(`../src/services/policy.ts?p=${encodeURIComponent(raw)}${Date.now()}`);
+    const got = fresh.HARD_CEILINGS.maxSatsPerTx;
+    if (raw.trim() === '500') {
+      assert.equal(got, 500, 'surrounding whitespace should still parse');
+    } else {
+      assert.notEqual(got, 1, `${why}: "${raw}" was truncated to 1 satoshi`);
+      assert.ok(got >= 100_000, `${why}: "${raw}" should fall back to the default, got ${got}`);
+    }
+  }
+  process.env.ORDNET_POLICY_MAX_SATS_PER_TX = 'unlimited';
 });
 
 await t('broadcastGuarded enforces, broadcasts and records in order', async () => {

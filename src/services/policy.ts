@@ -44,16 +44,58 @@ export interface SpendPolicy {
 // where the same caller would otherwise simply lift its own limits.
 // ============================================================================
 
-function envCeiling(name: string): number | null {
+/**
+ * Default ceilings, applied when the operator sets nothing.
+ *
+ * These used to be null, and enforcePolicy() returns early when both limits
+ * are null — so out of the box there was NO limit at all: ordnet_send accepted
+ * up to 2.1e15 sats and broadcast immediately. Combined with on-chain content
+ * flowing into the agent's context (anyone can inscribe a prompt for under a
+ * cent), that is a complete path from injection to drained wallet.
+ *
+ * A default that has to be raised deliberately is the safe shape. These are
+ * generous enough for normal agent work and small enough that a confused or
+ * manipulated agent cannot empty a wallet before a human notices.
+ *
+ * Raise them with ORDNET_POLICY_MAX_SATS_PER_TX / _PER_SESSION, or set either
+ * to the literal string "unlimited" to opt out entirely — spelled out, so it
+ * is a decision rather than an omission.
+ */
+const DEFAULT_MAX_SATS_PER_TX = 100_000;        // ~0.001 BSV per transaction
+const DEFAULT_MAX_SATS_PER_SESSION = 1_000_000; // ~0.01 BSV per process lifetime
+
+function envCeiling(name: string, fallback: number): number | null {
   const raw = process.env[name];
-  if (!raw) return null;
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  if (raw === undefined || raw === '') return fallback;
+  if (raw.trim().toLowerCase() === 'unlimited') {
+    console.error(
+      `[policy] ${name}=unlimited — this server will broadcast any amount an agent asks for.`
+    );
+    return null;
+  }
+  // parseInt stops at the first non-digit, so "1e9" becomes 1 and "100_000"
+  // becomes 100 — both pass `n > 0` silently. The ceiling then sits at one
+  // satoshi and the operator has no idea why the server refuses everything.
+  // Require the whole string to be digits.
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    console.error(
+      `[policy] ${name}="${raw}" is not a plain integer number of satoshis — using the default ${fallback}. ` +
+        `Write it in full (e.g. 1000000), without separators, exponents or units.`
+    );
+    return fallback;
+  }
+  const n = Number(trimmed);
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    console.error(`[policy] ${name}="${raw}" is out of range — using the default ${fallback}.`);
+    return fallback;
+  }
+  return n;
 }
 
 export const HARD_CEILINGS = {
-  maxSatsPerTx: envCeiling('ORDNET_POLICY_MAX_SATS_PER_TX'),
-  maxSatsPerSession: envCeiling('ORDNET_POLICY_MAX_SATS_PER_SESSION')
+  maxSatsPerTx: envCeiling('ORDNET_POLICY_MAX_SATS_PER_TX', DEFAULT_MAX_SATS_PER_TX),
+  maxSatsPerSession: envCeiling('ORDNET_POLICY_MAX_SATS_PER_SESSION', DEFAULT_MAX_SATS_PER_SESSION)
 } as const;
 
 export class PolicyViolationError extends Error {}

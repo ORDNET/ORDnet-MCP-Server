@@ -58,6 +58,12 @@ import {
   getViewerUrl
 } from './services/ordnet.js';
 
+// Network helpers: safeFetch vets attacker-supplied URLs, withTimeout is the
+// bare timeout wrapper for calls to hosts we control. withTimeout was used at
+// the price endpoint without ever being imported — a compile error that no CI
+// existed to catch.
+import { withTimeout } from './services/net.js';
+
 import {
   encryptWIF,
   decryptWIF,
