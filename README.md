@@ -3,6 +3,9 @@
 > Enable AI agents to create Web3 content on Bitcoin SV blockchain
 
 [![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](https://github.com/ORDNET/ORDnet-MCP-Server)
+[![tests](https://github.com/ORDNET/ORDnet-MCP-Server/actions/workflows/test.yml/badge.svg)](https://github.com/ORDNET/ORDnet-MCP-Server/actions/workflows/test.yml)
+[![test count](https://img.shields.io/badge/tests-28_passing-2b8a3e?style=flat-square)](#development)
+[![tools](https://img.shields.io/badge/MCP_tools-45-364fc7?style=flat-square)](#tools-reference)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## Overview
@@ -118,7 +121,7 @@ identical; only the scale differs.
 
 | Tool | Description |
 |------|-------------|
-| `ordnet_wallet_init` | Initialize wallet from WIF private key |
+| `ordnet_wallet_init` | Initialize wallet from WIF private key † |
 | `ordnet_wallet_init_env` | Initialize from environment variable (recommended) |
 | `ordnet_wallet_status` | Check wallet status and balance |
 | `ordnet_wallet_balance` | Get balance for any BSV address |
@@ -163,7 +166,7 @@ identical; only the scale differs.
 | `ordnet_security_encrypt_wallet` | Encrypt WIF with AES-256-GCM |
 | `ordnet_security_tier` | Check security tier |
 | `ordnet_security_validate_password` | Validate password strength |
-| `ordnet_generate_wallet` | Generate new random wallet |
+| `ordnet_generate_wallet` | Generate new random wallet † |
 
 ### Payments (5 tools)
 
@@ -200,6 +203,11 @@ identical; only the scale differs.
 | `ordnet_price` | BSV price in fiat |
 
 **Total: 45 tools.**
+
+† Disabled on the remote HTTP transport: these two tools would move a
+plaintext private key (WIF) over the network. Locally (stdio) they work;
+remotely the server refuses them with an explanatory error. Use
+`ordnet_wallet_init_env` on servers.
 
 ## Example: Create an HTML Inscription
 
